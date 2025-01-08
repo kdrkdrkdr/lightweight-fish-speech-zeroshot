@@ -1,10 +1,14 @@
 import os
+import warnings
+warnings.filterwarnings('ignore')
 import torch
 torch.manual_seed(1234)
+torch.cuda.manual_seed(1234)
+torch.cuda.manual_seed_all(1234)
 import random
 random.seed(1234)
-
 import numpy as np
+np.random.seed(1234)
 from pathlib import Path
 import soundfile as sf
 import torchaudio
@@ -12,8 +16,6 @@ from loguru import logger
 from tools.llama.generate import (
     load_model as load_llama_model,
     generate_long,
-    encode_tokens,
-    BaseTransformer
 )
 from tools.vqgan.inference import load_model as load_vqgan_model
 
@@ -83,15 +85,6 @@ class FishSpeechInference:
         prompt_tokens_data = np.load(prompt_tokens)
         prompt_tokens_tensor = torch.from_numpy(prompt_tokens_data)
         
-        # 입력 토큰화
-        encoded = encode_tokens(
-            tokenizer=self.llama_model.tokenizer,
-            string=text,
-            device="cuda",
-            prompt_tokens=prompt_tokens_tensor,
-            num_codebooks=self.llama_model.config.num_codebooks
-        )
-        
         # 토큰 생성
         responses = []
         generator = generate_long(
@@ -104,7 +97,7 @@ class FishSpeechInference:
             temperature=0.3,
             # compile=True,
             top_p=1,
-            repetition_penalty=1.13,
+            repetition_penalty=1.03,
             prompt_text=prompt_text,
             prompt_tokens=prompt_tokens_tensor,
             iterative_prompt=False  # 텍스트를 나누지 않고 한번에 처리
@@ -148,37 +141,35 @@ class FishSpeechInference:
         )
         return output_path
     
-    def run_inference(self, text, reference_audio, prompt_text):
-        """전체 추론 파이프라인 실행"""
-        os.chdir(self.project_root)
-        
-        # 1. 음성 프롬프트 생성
-        prompt_tokens = self.generate_voice_prompt(reference_audio)
-        logger.info(f"Generated voice prompt: {prompt_tokens}")
-        
-        # 2. 시맨틱 토큰 생성
-        code_files = self.generate_semantic_tokens(text, prompt_text, prompt_tokens)
-        logger.info(f"Generated semantic tokens: {code_files}")
-        
-        # 3. 오디오 생성
-        outputs = []
-        for code_file in code_files:
-            output_path = self.generate_audio(code_file)
-            outputs.append(output_path)
-            logger.info(f"Generated audio: {output_path}")
-            
-        return outputs
 
 def main():
-    # 테스트용 입력값
-    text = "이게정말로가능하다고하면.내가너앞에서겠다.아니무슨말을하면알아들어야지.이게뭐하는짓이야"
-    reference_audio = r"C:\Users\kdrkdrkdr\Desktop\lightweight-fish-speech-zeroshot\park.wav"
-    prompt_text = "간단하게 말씀 나누시죠. 이 모든 내용이, 사실입니까. 먼저 신랑에게 묻겠습니다. 저는, 지금부터 제가 할 수 있는 일을 하러 갈 겁니다. 보는 눈이 있으니, 일단 자리를 이동하시죠. 매니저들의 인맥과 노하우를 활용해서 성사시키기 어려운 계약을 따내거나, 부득이하게 겹친 스케줄을 풀기도 하죠. 꼭 매니저가 해야 한다는 법은 없습니다. 지금처럼 회사 차원에서 관리하기도 합니다. 저녁 축하드립니다. 만약 계속 일을 한다면, 세 가지의 결말이 있습니다. "
+    text = "The weather is nice today. 오늘 날씨가 좋네요. 今日はいい天気ですね. 今天天气真好."
+    prompt_text = "간단하게 말씀 나누시죠. 이 모든 내용이, 사실입니까. 먼저 신랑에게 묻겠습니다. 저는, 지금부터 제가 할 수 있는 일을 하러 갈 겁니다. 보는 눈이 있으니, 일단 자리를 이동하시죠. 매니저들의 인맥과 노하우를 활용해서 성사시키기 어려운 계약을 따내거나, 부득이하게 겹친 스케줄을 풀기도 하죠. 꼭 매니저가 해야 한다는 법은 없습니다. 지금처럼 회사 차원에서 관리하기도 합니다. 저녁 축하드립니다. 만약 계속 일을 한다면, 세 가지의 결말이 있습니다."
+    reference_audio = r'park.wav'
+
     checkpoint_dir = "checkpoints/fish-speech-1.5"
-    
     inferencer = FishSpeechInference(checkpoint_dir=checkpoint_dir, device='cuda')
-    output_files = inferencer.run_inference(text, reference_audio, prompt_text)
-    logger.info(f"최종 생성된 오디오 파일들: {output_files}")
+    os.chdir(inferencer.project_root)
+    
+    # ref 오디오 프롬프트 토큰 뽑기
+    prompt_tokens = inferencer.generate_voice_prompt(reference_audio)
+    logger.info(f"Generated voice prompt: {prompt_tokens}")
+    
+    # ====================================
+    # text 시멘틱 토큰 만들기
+    code_files = inferencer.generate_semantic_tokens(text, prompt_text, prompt_tokens)
+    logger.info(f"Generated semantic tokens: {code_files}")
+    
+    # 오디오 생성
+    outputs = []
+    for code_file in code_files:
+        output_path = inferencer.generate_audio(code_file)
+        outputs.append(output_path)
+        logger.info(f"Generated audio: {output_path}")
+
+    logger.info(f"최종 생성된 오디오 파일들: {outputs}")
+    return outputs
+
 
 if __name__ == "__main__":
     main()
